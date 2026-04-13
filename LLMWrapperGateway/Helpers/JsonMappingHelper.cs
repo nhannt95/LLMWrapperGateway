@@ -34,6 +34,24 @@ public static partial class JsonMappingHelper
     }
 
     /// <summary>
+    /// Extracts a string value from JSON by dotted path like "result.output".
+    /// Returns null if path not found.
+    /// </summary>
+    public static string? ExtractByPath(string json, string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var result = ResolvePath(doc.RootElement, path);
+            return result == "null" ? null : result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Resolves a dotted path like "messages[0].content" or "model" from a JsonElement.
     /// Returns the raw JSON representation for objects/arrays, or the value for primitives.
     /// </summary>

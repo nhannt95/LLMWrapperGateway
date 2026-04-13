@@ -8,7 +8,7 @@ public class WrapperConfig
     public string BaseUrl { get; set; } = string.Empty;
     public string? Session { get; set; }
     public string? RequestMapping { get; set; }
-    public string? ResponseMapping { get; set; }
+    public string? ResponsePath { get; set; } // path tới text trong response company, vd: "result.output"
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -19,5 +19,5 @@ public class CreateWrapperRequest
     public string BaseUrl { get; set; } = string.Empty;
     public string? Session { get; set; }
     public string? RequestMapping { get; set; }
-    public string? ResponseMapping { get; set; }
+    public string? ResponsePath { get; set; }
 }

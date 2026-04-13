@@ -22,7 +22,7 @@ CREATE TABLE `Wrappers` (
     `BaseUrl`          VARCHAR(1024) NOT NULL,
     `Session`          VARCHAR(512)  NULL,
     `RequestMapping`   TEXT          NULL,
-    `ResponseMapping`  TEXT          NULL,
+    `ResponsePath`     VARCHAR(512)  NULL,
     `CreatedAt`        DATETIME(6)   NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     PRIMARY KEY (`Id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -38,7 +38,7 @@ CREATE TABLE `Wrappers` (
 | `BaseUrl` | VARCHAR(1024) | Yes | URL gốc API đích, ví dụ `http://example.com` |
 | `Session` | VARCHAR(512) | No | Session ID. Nếu có → URL = `{BaseUrl}/v1/{Session}?stream=...` |
 | `RequestMapping` | TEXT | No | JSON template transform body client → body company (tự do, tùy công ty) |
-| `ResponseMapping` | TEXT | No | JSON template transform response company → response client |
+| `ResponsePath` | VARCHAR(512) | No | Đường dẫn tới field text trong response company, vd: `result.output` |
 | `CreatedAt` | DATETIME(6) | Yes | Thời điểm tạo |
 
 ### Ghi chú quan trọng
@@ -47,14 +47,15 @@ CREATE TABLE `Wrappers` (
 - Client tự giữ api-key của công ty, gửi qua header `api-key`
 - Gateway chỉ đổi tên header: `api-key` → `x-api-key` rồi forward
 - `RequestMapping` là **free-form JSON template** - mỗi công ty cấu trúc body khác nhau, user tự định nghĩa
+- `ResponsePath` chỉ cần điền path tới field text, gateway tự wrap thành format chuẩn OpenAI
 
 ### Ví dụ data trong bảng
 
-| Id | Name | Provider | BaseUrl | Session | RequestMapping |
-|----|------|----------|---------|---------|----------------|
-| a1b2... | Company ABC | local | http://abc.com | sess-123 | `{"input":{"text":"{messages[0].content}"}}` |
-| c3d4... | Company XYZ | local | http://xyz.com | sid-456 | `{"payload":{"prompt":"{messages[0].content}"},"meta":{"ver":"v2"}}` |
-| e5f6... | My Ollama | ollama | http://localhost:11434 | *(null)* | *(null - passthrough)* |
+| Id | Name | BaseUrl | Session | RequestMapping | ResponsePath |
+|----|------|---------|---------|----------------|--------------|
+| a1b2... | Company ABC | http://abc.com | sess-123 | `{"input":{"text":"{messages[0].content}"}}` | `result.output` |
+| c3d4... | Company XYZ | http://xyz.com | sid-456 | `{"payload":{"prompt":"{messages[0].content}"}}` | `data.text` |
+| e5f6... | My Ollama | http://localhost:11434 | *(null)* | *(null - passthrough)* | *(null)* |
 
 ---
 
@@ -132,7 +133,7 @@ Bước 7: Nhận response
 | `BaseUrl` | URL gốc của API đích, ví dụ `http://example.com` |
 | `Session` | Session ID của company API. Nếu có → URL = `{BaseUrl}/v1/{Session}?stream=...` |
 | `RequestMapping` | JSON template tự do - transform body client → body company API |
-| `ResponseMapping` | JSON template tự do - transform response company → response client |
+| `ResponsePath` | Path tới field text trong response company, vd: `"result.output"` |
 
 ---
 
@@ -193,66 +194,46 @@ Gateway không quan tâm cấu trúc gì - chỉ tìm `{placeholder}` và replac
 | `{messages[0].role}` | `"user"` |
 | `{session}` | `"session-id-123"` (từ WrapperConfig.Session) |
 
-#### ResponseMapping - Chuyển response company → format Ollama/OpenAI
+#### ResponsePath - Chỉ cần điền path, format OpenAI được set cứng
 
-Company API trả response dạng custom, ví dụ:
+Bạn chỉ cần điền **path tới field chứa text** trong response company.
+Gateway tự động wrap thành format chuẩn OpenAI chat completion.
+
+**Ví dụ:** Company API trả:
 ```json
-{
-  "result": {
-    "output": "Xin chào! Tôi có thể giúp gì?",
-    "tokens_used": 42
-  },
-  "status": "success"
-}
+{"result": {"output": "Xin chào!", "tokens": 42}, "status": "ok"}
 ```
 
-ResponseMapping sẽ **chọn đúng field chứa text** rồi wrap thành format chuẩn OpenAI:
+Bạn set `responsePath = "result.output"` → Gateway tự build response:
 ```json
 {
-  "id": "chatcmpl-wrapper",
+  "id": "chatcmpl-xxxxxxxx",
   "object": "chat.completion",
+  "created": 1713045600,
   "choices": [
     {
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "{result.output}"
+        "content": "Xin chào!"
       },
       "finish_reason": "stop"
     }
-  ]
+  ],
+  "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 }
 ```
 
-Kết quả client nhận được (chuẩn OpenAI, LangChain/LiteLLM đọc được):
-```json
-{
-  "id": "chatcmpl-wrapper",
-  "object": "chat.completion",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "Xin chào! Tôi có thể giúp gì?"
-      },
-      "finish_reason": "stop"
-    }
-  ]
-}
-```
+**Các ví dụ ResponsePath tùy company:**
 
-**Placeholder cho ResponseMapping:** (lấy từ response company trả về)
+| Company response | ResponsePath | Text lấy được |
+|------------------|-------------|----------------|
+| `{"result":{"output":"Hello"}}` | `result.output` | `Hello` |
+| `{"data":{"text":"Hello"}}` | `data.text` | `Hello` |
+| `{"answer":"Hello"}` | `answer` | `Hello` |
+| `{"results":[{"content":"Hello"}]}` | `results[0].content` | `Hello` |
 
-| Company response | Placeholder | Lấy được |
-|------------------|-------------|----------|
-| `{"result":{"output":"Hello"}}` | `{result.output}` | `Hello` |
-| `{"data":{"text":"Hello"}}` | `{data.text}` | `Hello` |
-| `{"answer":"Hello"}` | `{answer}` | `Hello` |
-| `{"results":[{"content":"Hello"}]}` | `{results[0].content}` | `Hello` |
-
-> **Nếu ResponseMapping = null** → trả nguyên response company (không transform).
-> Khi bạn xem được response thật từ company, set ResponseMapping để chọn đúng field chứa text.
+> **Nếu ResponsePath = null** → trả nguyên response company (không transform).
 
 ---
 
@@ -332,7 +313,7 @@ Sửa `Server`, `Port`, `User`, `Password` cho phù hợp với MySQL của bạ
                           │  - BaseUrl       │
                           │  - Session       │
                           │  - RequestMapping│
-                          │  - ResponseMapping│
+                          │  - ResponsePath  │
                           │                  │
                           │  (KHÔNG lưu key) │
                           └──────────────────┘
@@ -350,7 +331,7 @@ api-key: abc123  →    passthrough     →     x-api-key: abc123
 
 ## Ví dụ cụ thể end-to-end
 
-### Bước 1: Tạo wrapper (cấu hình mapping cả request + response)
+### Bước 1: Tạo wrapper
 
 ```http
 POST /api/wrappers
@@ -362,23 +343,11 @@ Content-Type: application/json
   "baseUrl": "http://example.com",
   "session": "abc-session-123",
   "requestMapping": "{\n  \"input\": {\"text\": \"{messages[0].content}\"},\n  \"config\": {\"model_name\": \"{model}\"}\n}",
-  "responseMapping": "{\n  \"id\": \"chatcmpl-wrapper\",\n  \"object\": \"chat.completion\",\n  \"choices\": [{\n    \"index\": 0,\n    \"message\": {\"role\": \"assistant\", \"content\": \"{result.output}\"},\n    \"finish_reason\": \"stop\"\n  }]\n}"
+  "responsePath": "result.output"
 }
 ```
 
-Response:
-```json
-{
-  "id": "d4f5a6b7-...",
-  "name": "Company ABC LLM",
-  "baseUrl": "http://example.com",
-  "session": "abc-session-123",
-  "requestMapping": "...",
-  "responseMapping": "..."
-}
-```
-
-> Wrapper chỉ là cấu hình mapping, không chứa key.
+> Chỉ cần điền `responsePath` là path tới text trong response company. Format OpenAI được set cứng.
 
 ### Bước 2: Client gọi wrapper (format chuẩn Ollama/OpenAI)
 
@@ -416,14 +385,16 @@ Body:   {"input":{"text":"Hello world"},"config":{"model_name":"gpt-4"}}
 }
 ```
 
-### Bước 5: Gateway transform response → trả client (format chuẩn OpenAI)
+### Bước 5: Gateway extract text → wrap format OpenAI → trả client
 
-ResponseMapping chọn `{result.output}` và wrap thành format OpenAI:
+`responsePath = "result.output"` → lấy `"Xin chào! Tôi có thể giúp gì cho bạn?"`
+→ tự động wrap thành format chuẩn OpenAI:
 
 ```json
 {
-  "id": "chatcmpl-wrapper",
+  "id": "chatcmpl-a1b2c3d4...",
   "object": "chat.completion",
+  "created": 1713045600,
   "choices": [
     {
       "index": 0,
@@ -433,7 +404,8 @@ ResponseMapping chọn `{result.output}` và wrap thành format OpenAI:
       },
       "finish_reason": "stop"
     }
-  ]
+  ],
+  "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 }
 ```
 
@@ -452,10 +424,11 @@ Request:                                             Request:
                                   {model}
 
 Response:                                            Response:
-  {"choices":[{                  ResponseMapping       {"result":
+  {"choices":[{               ResponsePath             {"result":
     "message":{              ◄──────────────────────     {"output":"Xin chào!"},
-      "content":"Xin chào!"     {result.output}         "status":"success"}
-    }}]}
+      "content":"Xin chào!"    result.output             "status":"success"}
+    }}]}                     (extract + wrap            }
+                              format OpenAI cứng)
 ```
 
 ---

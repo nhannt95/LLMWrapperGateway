@@ -19,7 +19,7 @@ public class WrapperDbContext : DbContext
             entity.Property(e => e.BaseUrl).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.Session).HasMaxLength(512);
             entity.Property(e => e.RequestMapping).HasColumnType("text");
-            entity.Property(e => e.ResponseMapping).HasColumnType("text");
+            entity.Property(e => e.ResponsePath).HasMaxLength(512);
         });
     }
 }

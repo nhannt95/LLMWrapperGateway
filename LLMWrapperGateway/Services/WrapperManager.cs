@@ -23,7 +23,7 @@ public class WrapperManager
             BaseUrl = request.BaseUrl.TrimEnd('/'),
             Session = request.Session,
             RequestMapping = request.RequestMapping,
-            ResponseMapping = request.ResponseMapping,
+            ResponsePath = request.ResponsePath,
             CreatedAt = DateTime.UtcNow
         };
 

@@ -171,19 +171,62 @@ app.Map("/w/{wrapperId}/{**path}", async (
 
     var responseBody = await upstreamResponse.Content.ReadAsStringAsync();
 
-    // Transform response if mapping is configured
-    var transformedResponse = JsonMappingHelper.ApplyMapping(
-        wrapper.ResponseMapping, responseBody, extraVars);
+    // Extract text từ response company theo ResponsePath, wrap thành format OpenAI
+    string finalResponse;
+    if (!string.IsNullOrEmpty(wrapper.ResponsePath))
+    {
+        var content = JsonMappingHelper.ExtractByPath(responseBody, wrapper.ResponsePath) ?? "";
+        finalResponse = BuildOpenAiResponse(content);
+    }
+    else
+    {
+        // Không có ResponsePath → trả nguyên response company
+        finalResponse = responseBody;
+    }
 
     context.Response.StatusCode = (int)upstreamResponse.StatusCode;
     context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync(transformedResponse);
+    await context.Response.WriteAsync(finalResponse);
     return Results.Empty;
 })
 .WithName("WrapperProxy")
 .WithOpenApi();
 
 app.Run();
+
+// ── Helper: build hardcoded OpenAI response format ──
+static string BuildOpenAiResponse(string content)
+{
+    var escaped = content
+        .Replace("\\", "\\\\")
+        .Replace("\"", "\\\"")
+        .Replace("\n", "\\n")
+        .Replace("\r", "\\r")
+        .Replace("\t", "\\t");
+
+    return $$"""
+    {
+      "id": "chatcmpl-{{Guid.NewGuid():N}}",
+      "object": "chat.completion",
+      "created": {{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "{{escaped}}"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+    """;
+}
 
 // ── Helper: build upstream URL ──
 // Company API (có Session): {BaseUrl}/v1/{SessionId}?stream=true/false
